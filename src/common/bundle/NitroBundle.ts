@@ -53,7 +53,8 @@ export class NitroBundle
             buffer.writeUint16(fileName.length);
             buffer.writeString(fileName);
 
-            const compressed = deflate(fileBuffer);
+            // Use maximum compression (level 9) for better file size
+            const compressed = deflate(fileBuffer, { level: 9 });
             buffer.writeUint32(compressed.length);
             buffer.append(compressed);
         }

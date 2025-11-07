@@ -1,14 +1,22 @@
-import encoder from 'png-stream/encoder';
-import streamToArray from 'stream-to-array';
+import sharp from 'sharp';
 import { promisify } from 'util';
 import { unzip } from 'zlib';
 import { ISWFTag } from './common';
 
-export const ReadImagesDefineBitsLossless = async (tag: Partial<ISWFTag>) =>
+export interface IImageData
+{
+    code: number;
+    characterId: number;
+    imgType: string;
+    imgData: Buffer;
+    bitmapWidth?: number;
+    bitmapHeight?: number;
+}
+
+export const ReadImagesDefineBitsLossless = async (tag: Partial<ISWFTag>): Promise<IImageData | null> =>
 {
     const { characterId, bitmapFormat, bitmapWidth, bitmapHeight, bitmapColorTableSize, zlibBitmapData } = tag;
 
-    const pngEncoder = new encoder(bitmapWidth, bitmapHeight, { colorSpace: 'rgba' });
     const dataBuf = await promisify(unzip)(zlibBitmapData);
 
     if(!dataBuf) return null;
@@ -72,17 +80,22 @@ export const ReadImagesDefineBitsLossless = async (tag: Partial<ISWFTag>) =>
             break;
     }
 
-    pngEncoder.end(output);
-
-    const parts = await streamToArray(pngEncoder);
-
-    const buffers = parts.map(part => Buffer.isBuffer(part) ? part : Buffer.from(part));
+    // Convert to WebP using sharp with high quality and lossless compression
+    const webpBuffer = await sharp(output, {
+        raw: {
+            width: bitmapWidth,
+            height: bitmapHeight,
+            channels: 4
+        }
+    })
+    .webp({ quality: 95, lossless: false, effort: 6 })
+    .toBuffer();
 
     return {
         code: 36,
         characterId: characterId,
-        imgType: 'png',
-        imgData: Buffer.concat(buffers),
+        imgType: 'webp',
+        imgData: webpBuffer,
         bitmapWidth: bitmapWidth,
         bitmapHeight: bitmapHeight
     };

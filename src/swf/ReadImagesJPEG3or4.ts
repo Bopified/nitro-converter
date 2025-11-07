@@ -1,22 +1,21 @@
 import * as concatFrames from 'concat-frames';
 import decoder from 'jpg-stream/decoder';
-import encoder from 'png-stream/encoder';
+import sharp from 'sharp';
 import { PassThrough } from 'stream';
-import streamToArray from 'stream-to-array';
 import { promisify } from 'util';
 import { unzip } from 'zlib';
 import { SlicedToArray } from '../common';
 import { ISWFTag } from './common';
+import { IImageData } from './ReadImagesDefineBitsLossless';
 import { RecognizeImageHeader } from './RecognizeImageHeader';
 
-export const ReadImagesJPEG3or4 = async (code: number, tag: Partial<ISWFTag>) =>
+export const ReadImagesJPEG3or4 = async (code: number, tag: Partial<ISWFTag>): Promise<IImageData> =>
 {
     const { characterId, imgData, bitmapAlphaData } = tag;
     const imgType = RecognizeImageHeader(imgData);
 
     if(imgType !== 'jpeg') return { code, characterId, imgType, imgData };
 
-    const pngEncoder = new encoder(undefined, undefined, { colorSpace: 'rgba' });
     const alphaBufPre = await promisify(unzip)(bitmapAlphaData);
 
     let alphaBuffer: Buffer = null;
@@ -27,51 +26,65 @@ export const ReadImagesJPEG3or4 = async (code: number, tag: Partial<ISWFTag>) =>
 
     bufferStream.end(imgData);
 
-    bufferStream
-        .pipe(new decoder())
-        .pipe(concatFrames.default((data: any) =>
-        {
-            const _ref2 = SlicedToArray.slicedToArray(data, 1);
-            const frame = _ref2[0];
-
-            const input = frame.pixels;
-            const pCount = frame.width * frame.height;
-            const output = Buffer.alloc(pCount * 4);
-
-            if(alphaBuffer !== null && alphaBuffer.length !== pCount)
+    return new Promise((resolve, reject) =>
+    {
+        bufferStream
+            .pipe(new decoder())
+            .pipe(concatFrames.default(async (data: any) =>
             {
-                console.error('expect alphaBuf to have size ' + pCount + ' while getting ' + alphaBuffer.length);
-            }
+                try
+                {
+                    const _ref2 = SlicedToArray.slicedToArray(data, 1);
+                    const frame = _ref2[0];
 
-            const getAlphaBuffer = (i: any) =>
-            {
-                if(!alphaBuffer) return 0xFF;
+                    const input = frame.pixels;
+                    const pCount = frame.width * frame.height;
+                    const output = Buffer.alloc(pCount * 4);
 
-                return alphaBuffer[i];
-            };
+                    if(alphaBuffer !== null && alphaBuffer.length !== pCount)
+                    {
+                        console.error('expect alphaBuf to have size ' + pCount + ' while getting ' + alphaBuffer.length);
+                    }
 
-            for(let i = 0; i < pCount; ++i)
-            {
-                output[4 * i] = input[3 * i];
-                output[4 * i + 1] = input[3 * i + 1];
-                output[4 * i + 2] = input[3 * i + 2];
-                output[4 * i + 3] = getAlphaBuffer(i);
-            }
+                    const getAlphaBuffer = (i: any) =>
+                    {
+                        if(!alphaBuffer) return 0xFF;
 
-            pngEncoder.format.width = frame.width;
-            pngEncoder.format.height = frame.height;
-            pngEncoder.end(output);
-        }));
+                        return alphaBuffer[i];
+                    };
 
-    const parts = await streamToArray(pngEncoder);
-    const buffers = parts.map(part => Buffer.isBuffer(part) ? part : Buffer.from(part));
+                    for(let i = 0; i < pCount; ++i)
+                    {
+                        output[4 * i] = input[3 * i];
+                        output[4 * i + 1] = input[3 * i + 1];
+                        output[4 * i + 2] = input[3 * i + 2];
+                        output[4 * i + 3] = getAlphaBuffer(i);
+                    }
 
-    bufferStream.end();
+                    // Convert to WebP using sharp with high quality
+                    const webpBuffer = await sharp(output, {
+                        raw: {
+                            width: frame.width,
+                            height: frame.height,
+                            channels: 4
+                        }
+                    })
+                    .webp({ quality: 95, lossless: false, effort: 6 })
+                    .toBuffer();
 
-    return {
-        code: code,
-        characterId: characterId,
-        imgType: 'png',
-        imgData: Buffer.concat(buffers)
-    };
+                    bufferStream.end();
+
+                    resolve({
+                        code: code,
+                        characterId: characterId,
+                        imgType: 'webp',
+                        imgData: webpBuffer
+                    });
+                }
+                catch(error)
+                {
+                    reject(error);
+                }
+            }));
+    });
 };

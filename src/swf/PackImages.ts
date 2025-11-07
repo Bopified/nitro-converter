@@ -1,4 +1,5 @@
 import { packAsync } from 'free-tex-packer-core';
+import sharp from 'sharp';
 import { ImageBundle, SpriteBundle } from '../common';
 
 export const PackImages = async (documentClass: string, imageBundle: ImageBundle, convertCase: boolean = false) =>
@@ -28,16 +29,27 @@ export const PackImages = async (documentClass: string, imageBundle: ImageBundle
         }
         else
         {
+            // Convert PNG to WebP for better compression
+            const webpBuffer = await sharp(item.buffer)
+                .webp({ quality: 95, lossless: false, effort: 6 })
+                .toBuffer();
+
+            const newName = item.name.replace(/\.png$/, '.webp');
+
             bundle.imageData = {
-                name: item.name,
-                buffer: item.buffer
+                name: newName,
+                buffer: webpBuffer
             };
 
-            if(convertCase) bundle.imageData.name = (documentClass.replace(/(?:^|\.?)([A-Z])/g, (x,y) => ('_' + y.toLowerCase().replace(/^_/, '')))).substring(1);
+            if(convertCase) bundle.imageData.name = (documentClass.replace(/(?:^|\.?)([A-Z])/g, (x,y) => ('_' + y.toLowerCase().replace(/^_/, '')))).substring(1) + '.webp';
         }
     }
 
-    if((bundle.spritesheet !== undefined) && (bundle.imageData !== undefined)) bundle.spritesheet.meta.image = bundle.imageData.name;
+    if((bundle.spritesheet !== undefined) && (bundle.imageData !== undefined))
+    {
+        // Update the image reference to .webp
+        bundle.spritesheet.meta.image = bundle.imageData.name;
+    }
 
     return bundle;
 };
