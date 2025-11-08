@@ -154,7 +154,7 @@ export class ConverterUtilities
 
                     if(extension === 'nitro')
                     {
-                        const nitroBundle = NitroBundle.from((await file.getContentsAsBuffer()).buffer);
+                        const nitroBundle = await NitroBundle.from((await file.getContentsAsBuffer()).buffer);
 
                         for await (const [ bundleName, bundleBuffer ] of nitroBundle.files.entries())
                         {

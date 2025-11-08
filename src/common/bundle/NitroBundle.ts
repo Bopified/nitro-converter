@@ -1,5 +1,6 @@
 import ByteBuffer from 'bytebuffer';
-import { Data, deflate, inflate } from 'pako';
+import { compress as zstdCompress, decompress as zstdDecompress } from '@mongodb-js/zstd';
+import { inflate as pakoInflate } from 'pako';
 import { BinaryReader } from '../utils';
 
 export class NitroBundle
@@ -11,7 +12,7 @@ export class NitroBundle
         this._files = new Map<string, Buffer>();
     }
 
-    public static from(buffer: ArrayBuffer): NitroBundle
+    public static async from(buffer: ArrayBuffer): Promise<NitroBundle>
     {
         const nitroBundle = new NitroBundle();
         const binaryReader = new BinaryReader(buffer);
@@ -24,9 +25,30 @@ export class NitroBundle
             const fileName = binaryReader.readBytes(fileNameLength).toString();
             const fileLength = binaryReader.readInt();
             const buffer = binaryReader.readBytes(fileLength);
-            const decompressed = inflate((buffer.toArrayBuffer() as Data));
 
-            nitroBundle.addFile(fileName, Buffer.from(decompressed.buffer));
+            let decompressed: Buffer;
+
+            // Try zstd first (new format), fall back to pako (old format)
+            // This allows reading both old and new .nitro files during migration
+            try
+            {
+                decompressed = await zstdDecompress(Buffer.from(buffer.toArrayBuffer()));
+            }
+            catch(zstdError)
+            {
+                // Fall back to pako for backward compatibility
+                try
+                {
+                    const pakoDecompressed = pakoInflate(new Uint8Array(buffer.toArrayBuffer()));
+                    decompressed = Buffer.from(pakoDecompressed.buffer);
+                }
+                catch(pakoError)
+                {
+                    throw new Error(`Failed to decompress ${fileName}: Neither zstd nor pako worked. Zstd: ${zstdError.message}, Pako: ${pakoError.message}`);
+                }
+            }
+
+            nitroBundle.addFile(fileName, decompressed);
 
             fileCount--;
         }
@@ -53,8 +75,9 @@ export class NitroBundle
             buffer.writeUint16(fileName.length);
             buffer.writeString(fileName);
 
-            // Use maximum compression (level 9) for better file size
-            const compressed = deflate(fileBuffer, { level: 9 });
+            // Use zstd compression (level 10 = balanced speed/ratio, max is 22)
+            // Level 10 provides excellent compression with fast decompression
+            const compressed = await zstdCompress(fileBuffer, 10);
             buffer.writeUint32(compressed.length);
             buffer.append(compressed);
         }

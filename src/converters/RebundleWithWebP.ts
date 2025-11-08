@@ -65,7 +65,7 @@ export class RebundleWithWebP
                     // Ensure extracted directory exists
                     await extractedDirectory.createDirectory();
 
-                    const nitroBundle = NitroBundle.from((await nitroFile.getContentsAsBuffer()).buffer);
+                    const nitroBundle = await NitroBundle.from((await nitroFile.getContentsAsBuffer()).buffer);
 
                     // Extract files
                     let jsonFileName: string = null;
